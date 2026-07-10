@@ -47,12 +47,12 @@ export async function POST() {
 
       const samples = heartRateData.dataPoints ?? [];
       const heartRateAvg =
-        samples.length > 0
-          ? samples.reduce(
-              (sum: number, point: any) => sum + (point.heartRate?.beatsPerMinute ?? 0),
-              0
-            ) / samples.length
-          : null;
+       samples.length > 0
+         ? samples.reduce(
+             (sum: number, point: any) => sum + Number(point.heartRate?.beatsPerMinute ?? 0),
+             0
+         ) / samples.length
+         : null;
 
       const { error: insertError } = await supabase.from("fitbit_metrics").insert({
         event_id: event.id,
