@@ -55,18 +55,31 @@ export async function getValidAccessToken(): Promise<string> {
 export async function getHeartRateData(accessToken: string, startTime: string, endTime: string) {
   const filter = `heart_rate.sample_time.physical_time >= "${startTime}" AND heart_rate.sample_time.physical_time < "${endTime}"`;
 
-  const url = `https://health.googleapis.com/v4/users/me/dataTypes/heart-rate/dataPoints?filter=${encodeURIComponent(filter)}`;
+  let allDataPoints: any[] = [];
+  let pageToken: string | undefined = undefined;
 
-  const response = await fetch(url, {
-    headers: { Authorization: `Bearer ${accessToken}` },
-  });
+  do {
+    const params = new URLSearchParams({ filter });
+    if (pageToken) {
+      params.set("pageToken", pageToken);
+    }
 
-  const data = await response.json();
+    const url = `https://health.googleapis.com/v4/users/me/dataTypes/heart-rate/dataPoints?${params.toString()}`;
 
-  if (!response.ok) {
-    console.error("Error consultando heart rate:", data);
-    throw new Error(`Fallo la consulta de heart rate a Google Health: ${JSON.stringify(data)}`);
-  }
+    const response = await fetch(url, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
 
-  return data;
+    const data = await response.json();
+
+    if (!response.ok) {
+      console.error("Error consultando heart rate:", data);
+      throw new Error(`Fallo la consulta de heart rate a Google Health: ${JSON.stringify(data)}`);
+    }
+
+    allDataPoints = allDataPoints.concat(data.dataPoints ?? []);
+    pageToken = data.nextPageToken;
+  } while (pageToken);
+
+  return { dataPoints: allDataPoints };
 }
