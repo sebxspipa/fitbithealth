@@ -77,8 +77,14 @@ export async function POST() {
 
       processedCount++;
     } catch (err) {
-      console.error(`Error procesando evento ${event.id}:`, err);
-      // Dejamos el evento en 'pending' para reintentarlo en el próximo ciclo del cron
+    console.error(`Error procesando evento ${event.id}:`, err);
+    return NextResponse.json(
+        {
+        success: false,
+        error: err instanceof Error ? err.message : String(err),
+        },
+        { status: 500 }
+    );
     }
   }
 
