@@ -53,7 +53,7 @@ export async function getValidAccessToken(): Promise<string> {
 }
 
 export async function getHeartRateData(accessToken: string, startTime: string, endTime: string) {
-  const filter = `heart_rate.sample_time.physical_time >= "${startTime}" AND heart_rate.sample_time.physical_time <= "${endTime}"`;
+  const filter = `heart_rate.sample_time.physical_time >= "${startTime}" AND heart_rate.sample_time.physical_time < "${endTime}"`;
 
   const url = `https://health.googleapis.com/v4/users/me/dataTypes/heart-rate/dataPoints?filter=${encodeURIComponent(filter)}`;
 
