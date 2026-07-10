@@ -65,7 +65,7 @@ export async function getHeartRateData(accessToken: string, startTime: string, e
 
   if (!response.ok) {
     console.error("Error consultando heart rate:", data);
-    throw new Error("Fallo la consulta de heart rate a Google Health");
+    throw new Error(`Fallo la consulta de heart rate a Google Health: ${JSON.stringify(data)}`);
   }
 
   return data;
