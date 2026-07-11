@@ -135,14 +135,15 @@ export async function syncMetric(metricKey: string): Promise<{ synced: number }>
 
   const dataPoints = await fetchDataPoints(accessToken, config.dataType, filterField, startTime, endTime);
 
-  if (dataPoints.length === 0) {
+    if (dataPoints.length === 0) {
     await supabase.from("sync_state").upsert({
-      data_type: metricKey,
-      last_synced_at: endTime,
-      updated_at: new Date().toISOString(),
+        data_type: metricKey,
+        last_synced_at: endTime,
+        updated_at: new Date().toISOString(),
     });
+    console.log(`Sync ${metricKey}: 0 puntos. Ventana consultada: ${startTime} → ${endTime}`);
     return { synced: 0 };
-  }
+    }
 
   const rows = dataPoints
     .map((point) => ({
