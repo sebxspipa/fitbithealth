@@ -104,6 +104,10 @@ async function fetchDataPoints(
 
     allDataPoints = allDataPoints.concat(data.dataPoints ?? []);
     pageToken = data.nextPageToken;
+
+    if (pageToken) {
+      await new Promise((resolve) => setTimeout(resolve, 150));
+    }
   } while (pageToken);
 
   return allDataPoints;
@@ -123,7 +127,7 @@ export async function syncMetric(metricKey: string): Promise<{ synced: number }>
     .eq("data_type", metricKey)
     .maybeSingle();
 
-  const startTime = syncRow?.last_synced_at ?? new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  const startTime = syncRow?.last_synced_at ?? new Date(Date.now() - 15 * 60 * 1000).toISOString();
   const endTime = new Date().toISOString();
 
   const filterField =
