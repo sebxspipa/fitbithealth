@@ -13,13 +13,12 @@ export async function getValidAccessToken(): Promise<string> {
 
   const expiresAt = new Date(tokenRow.expires_at).getTime();
   const now = Date.now();
-  const bufferMs = 5 * 60 * 1000; // renovamos 5 min antes de que expire
+  const bufferMs = 5 * 60 * 1000;
 
   if (now < expiresAt - bufferMs) {
     return tokenRow.access_token;
   }
 
-  // Token expirado o por expirar: renovamos
   const refreshResponse = await fetch("https://oauth2.googleapis.com/token", {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -52,8 +51,34 @@ export async function getValidAccessToken(): Promise<string> {
   return refreshData.access_token;
 }
 
-export async function getHeartRateData(accessToken: string, startTime: string, endTime: string) {
-  const filter = `heart_rate.sample_time.physical_time >= "${startTime}" AND heart_rate.sample_time.physical_time < "${endTime}"`;
+type MetricConfig = {
+  dataType: string;
+  metricType: string;
+  unit: string;
+  extractValue: (point: any) => number;
+  extractSampleTime: (point: any) => string | undefined;
+};
+
+const METRIC_CONFIGS: Record<string, MetricConfig> = {
+  heart_rate: {
+    dataType: "heart-rate",
+    metricType: "heart_rate",
+    unit: "bpm",
+    extractValue: (point) => Number(point.heartRate?.beatsPerMinute ?? 0),
+    extractSampleTime: (point) => point.heartRate?.sampleTime?.physicalTime,
+  },
+  // steps: pendiente — el endpoint list() no devuelve conteos para "steps",
+  // requiere el endpoint :rollUp con una lógica distinta. Ver syncStepsRollup() (futuro).
+};
+
+async function fetchDataPoints(
+  accessToken: string,
+  dataType: string,
+  filterField: string,
+  startTime: string,
+  endTime: string
+): Promise<any[]> {
+  const filter = `${filterField} >= "${startTime}" AND ${filterField} < "${endTime}"`;
 
   let allDataPoints: any[] = [];
   let pageToken: string | undefined = undefined;
@@ -64,7 +89,7 @@ export async function getHeartRateData(accessToken: string, startTime: string, e
       params.set("pageToken", pageToken);
     }
 
-    const url = `https://health.googleapis.com/v4/users/me/dataTypes/heart-rate/dataPoints?${params.toString()}`;
+    const url = `https://health.googleapis.com/v4/users/me/dataTypes/${dataType}/dataPoints?${params.toString()}`;
 
     const response = await fetch(url, {
       headers: { Authorization: `Bearer ${accessToken}` },
@@ -73,13 +98,72 @@ export async function getHeartRateData(accessToken: string, startTime: string, e
     const data = await response.json();
 
     if (!response.ok) {
-      console.error("Error consultando heart rate:", data);
-      throw new Error(`Fallo la consulta de heart rate a Google Health: ${JSON.stringify(data)}`);
+      console.error(`Error consultando ${dataType}:`, data);
+      throw new Error(`Fallo la consulta de ${dataType} a Google Health: ${JSON.stringify(data)}`);
     }
 
     allDataPoints = allDataPoints.concat(data.dataPoints ?? []);
     pageToken = data.nextPageToken;
   } while (pageToken);
 
-  return { dataPoints: allDataPoints };
+  return allDataPoints;
+}
+
+export async function syncMetric(metricKey: string): Promise<{ synced: number }> {
+  const config = METRIC_CONFIGS[metricKey];
+  if (!config) {
+    throw new Error(`Métrica desconocida o no soportada aún: ${metricKey}`);
+  }
+
+  const accessToken = await getValidAccessToken();
+
+  const { data: syncRow } = await supabase
+    .from("sync_state")
+    .select("*")
+    .eq("data_type", metricKey)
+    .maybeSingle();
+
+  const startTime = syncRow?.last_synced_at ?? new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  const endTime = new Date().toISOString();
+
+  const filterField =
+    config.dataType === "heart-rate" ? "heart_rate.sample_time.physical_time" : `${config.dataType}.sample_time.physical_time`;
+
+  const dataPoints = await fetchDataPoints(accessToken, config.dataType, filterField, startTime, endTime);
+
+  if (dataPoints.length === 0) {
+    await supabase.from("sync_state").upsert({
+      data_type: metricKey,
+      last_synced_at: endTime,
+      updated_at: new Date().toISOString(),
+    });
+    return { synced: 0 };
+  }
+
+  const rows = dataPoints
+    .map((point) => ({
+      metric_type: config.metricType,
+      value: config.extractValue(point),
+      unit: config.unit,
+      sample_time: config.extractSampleTime(point),
+      source_device: point.dataSource?.platform ?? null,
+    }))
+    .filter((row) => row.sample_time);
+
+  const { error: insertError } = await supabase
+    .from("physiological_samples")
+    .upsert(rows, { onConflict: "metric_type,sample_time,source_device", ignoreDuplicates: true });
+
+  if (insertError) {
+    console.error(`Error guardando muestras de ${metricKey}:`, insertError);
+    throw insertError;
+  }
+
+  await supabase.from("sync_state").upsert({
+    data_type: metricKey,
+    last_synced_at: endTime,
+    updated_at: new Date().toISOString(),
+  });
+
+  return { synced: rows.length };
 }
