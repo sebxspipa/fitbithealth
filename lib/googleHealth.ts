@@ -53,6 +53,7 @@ export async function getValidAccessToken(): Promise<string> {
 
 type MetricConfig = {
   dataType: string;
+  filterFieldPrefix: string;
   metricType: string;
   unit: string;
   extractValue: (point: any) => number;
@@ -62,13 +63,28 @@ type MetricConfig = {
 const METRIC_CONFIGS: Record<string, MetricConfig> = {
   heart_rate: {
     dataType: "heart-rate",
+    filterFieldPrefix: "heart_rate",
     metricType: "heart_rate",
     unit: "bpm",
     extractValue: (point) => Number(point.heartRate?.beatsPerMinute ?? 0),
     extractSampleTime: (point) => point.heartRate?.sampleTime?.physicalTime,
   },
-  // steps: pendiente — el endpoint list() no devuelve conteos para "steps",
-  // requiere el endpoint :rollUp con una lógica distinta. Ver syncStepsRollup() (futuro).
+  hrv: {
+    dataType: "heart-rate-variability",
+    filterFieldPrefix: "heart_rate_variability",
+    metricType: "hrv",
+    unit: "ms",
+    // OJO: nombre del campo sin confirmar todavía — ver debug_raw_sample en la respuesta del endpoint
+    extractValue: (point) =>
+      Number(
+        point.heartRateVariability?.rmssdMillis ??
+          point.heartRateVariability?.rmssd ??
+          point.heartRateVariability?.value ??
+          0
+      ),
+    extractSampleTime: (point) => point.heartRateVariability?.sampleTime?.physicalTime,
+  },
+  // steps: pendiente — requiere el endpoint :rollUp, no el endpoint list().
 };
 
 async function fetchDataPoints(
@@ -113,7 +129,7 @@ async function fetchDataPoints(
   return allDataPoints;
 }
 
-export async function syncMetric(metricKey: string): Promise<{ synced: number }> {
+export async function syncMetric(metricKey: string): Promise<{ synced: number; rawSample?: any }> {
   const config = METRIC_CONFIGS[metricKey];
   if (!config) {
     throw new Error(`Métrica desconocida o no soportada aún: ${metricKey}`);
@@ -130,20 +146,19 @@ export async function syncMetric(metricKey: string): Promise<{ synced: number }>
   const startTime = syncRow?.last_synced_at ?? new Date(Date.now() - 15 * 60 * 1000).toISOString();
   const endTime = new Date().toISOString();
 
-  const filterField =
-    config.dataType === "heart-rate" ? "heart_rate.sample_time.physical_time" : `${config.dataType}.sample_time.physical_time`;
+  const filterField = `${config.filterFieldPrefix}.sample_time.physical_time`;
 
   const dataPoints = await fetchDataPoints(accessToken, config.dataType, filterField, startTime, endTime);
 
-    if (dataPoints.length === 0) {
+  if (dataPoints.length === 0) {
     await supabase.from("sync_state").upsert({
-        data_type: metricKey,
-        last_synced_at: endTime,
-        updated_at: new Date().toISOString(),
+      data_type: metricKey,
+      last_synced_at: endTime,
+      updated_at: new Date().toISOString(),
     });
-    console.log(`Sync ${metricKey}: 0 puntos. Ventana consultada: ${startTime} → ${endTime}`);
+    console.log(`Sync ${metricKey}: 0 puntos. Ventana: ${startTime} → ${endTime}`);
     return { synced: 0 };
-    }
+  }
 
   const rows = dataPoints
     .map((point) => ({
@@ -166,6 +181,101 @@ export async function syncMetric(metricKey: string): Promise<{ synced: number }>
 
   await supabase.from("sync_state").upsert({
     data_type: metricKey,
+    last_synced_at: endTime,
+    updated_at: new Date().toISOString(),
+  });
+
+  return { synced: rows.length, rawSample: dataPoints[0] };
+}
+
+async function fetchSleepSessions(
+  accessToken: string,
+  startTime: string,
+  endTime: string
+): Promise<any[]> {
+  const filter = `sleep.interval.end_time >= "${startTime}" AND sleep.interval.end_time < "${endTime}"`;
+
+  let allPoints: any[] = [];
+  let pageToken: string | undefined = undefined;
+
+  do {
+    const params = new URLSearchParams({ filter });
+    if (pageToken) {
+      params.set("pageToken", pageToken);
+    }
+
+    const url = `https://health.googleapis.com/v4/users/me/dataTypes/sleep/dataPoints?${params.toString()}`;
+
+    const response = await fetch(url, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      console.error("Error consultando sleep:", data);
+      throw new Error(`Fallo la consulta de sleep a Google Health: ${JSON.stringify(data)}`);
+    }
+
+    allPoints = allPoints.concat(data.dataPoints ?? []);
+    pageToken = data.nextPageToken;
+
+    if (pageToken) {
+      await new Promise((resolve) => setTimeout(resolve, 150));
+    }
+  } while (pageToken);
+
+  return allPoints;
+}
+
+export async function syncSleep(): Promise<{ synced: number }> {
+  const accessToken = await getValidAccessToken();
+
+  const { data: syncRow } = await supabase
+    .from("sync_state")
+    .select("*")
+    .eq("data_type", "sleep")
+    .maybeSingle();
+
+  const startTime = syncRow?.last_synced_at ?? new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString();
+  const endTime = new Date().toISOString();
+
+  const sessions = await fetchSleepSessions(accessToken, startTime, endTime);
+
+  if (sessions.length === 0) {
+    await supabase.from("sync_state").upsert({
+      data_type: "sleep",
+      last_synced_at: endTime,
+      updated_at: new Date().toISOString(),
+    });
+    console.log(`Sync sleep: 0 sesiones. Ventana: ${startTime} → ${endTime}`);
+    return { synced: 0 };
+  }
+
+  const rows = sessions
+    .map((point) => {
+      const minutesAsleep = point.sleep?.summary?.minutesAsleep ?? 0;
+      return {
+        metric_type: "sleep_hours",
+        value: Math.round((minutesAsleep / 60) * 100) / 100,
+        unit: "hours",
+        sample_time: point.sleep?.interval?.endTime,
+        source_device: point.dataSource?.platform ?? null,
+      };
+    })
+    .filter((row) => row.sample_time);
+
+  const { error: insertError } = await supabase
+    .from("physiological_samples")
+    .upsert(rows, { onConflict: "metric_type,sample_time,source_device", ignoreDuplicates: true });
+
+  if (insertError) {
+    console.error("Error guardando sesiones de sueño:", insertError);
+    throw insertError;
+  }
+
+  await supabase.from("sync_state").upsert({
+    data_type: "sleep",
     last_synced_at: endTime,
     updated_at: new Date().toISOString(),
   });
