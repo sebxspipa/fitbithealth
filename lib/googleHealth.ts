@@ -76,12 +76,7 @@ const METRIC_CONFIGS: Record<string, MetricConfig> = {
     unit: "ms",
     // OJO: nombre del campo sin confirmar todavía — ver debug_raw_sample en la respuesta del endpoint
     extractValue: (point) =>
-      Number(
-        point.heartRateVariability?.rmssdMillis ??
-          point.heartRateVariability?.rmssd ??
-          point.heartRateVariability?.value ??
-          0
-      ),
+     Number(point.heartRateVariability?.rootMeanSquareOfSuccessiveDifferencesMilliseconds ?? 0),
     extractSampleTime: (point) => point.heartRateVariability?.sampleTime?.physicalTime,
   },
   // steps: pendiente — requiere el endpoint :rollUp, no el endpoint list().
