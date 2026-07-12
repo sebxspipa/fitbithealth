@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 
 const EMOTIONS = [
   { value: "stress", label: "Estresado", emoji: "😓" },
@@ -56,6 +57,11 @@ export default function Home() {
     <main className="min-h-screen flex items-center justify-center bg-zinc-100">
       <div className="w-full max-w-md rounded-xl bg-white p-8 shadow-lg">
         <h1 className="text-3xl font-bold text-center">Emotion Logger</h1>
+        <div className="text-center">
+          <Link href="/history" className="text-sm text-blue-500 hover:underline">
+            Ver historial →
+          </Link>
+        </div>
         <p className="mt-2 text-center text-zinc-500">
           ¿Cómo te sientes ahora?
         </p>
