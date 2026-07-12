@@ -321,7 +321,14 @@ async function fetchStepsRollup(
   return allPoints;
 }
 
-export async function syncSteps(): Promise<{ synced: number; rawSample?: any }> {
+export async function syncSteps(): Promise<{
+  synced: number;
+  rawSample?: any;
+  debugWindow?: {
+    startTime: string;
+    endTime: string;
+  };
+}> {
   const accessToken = await getValidAccessToken();
 
   const { data: syncRow } = await supabase
@@ -335,15 +342,23 @@ export async function syncSteps(): Promise<{ synced: number; rawSample?: any }> 
 
   const rollupPoints = await fetchStepsRollup(accessToken, startTime, endTime);
 
-  if (rollupPoints.length === 0) {
+    if (rollupPoints.length === 0) {
     await supabase.from("sync_state").upsert({
-      data_type: "steps",
-      last_synced_at: endTime,
-      updated_at: new Date().toISOString(),
+        data_type: "steps",
+        last_synced_at: endTime,
+        updated_at: new Date().toISOString(),
     });
+
     console.log(`Sync steps: 0 ventanas. Rango: ${startTime} → ${endTime}`);
-    return { synced: 0 };
-  }
+
+    return {
+        synced: 0,
+        debugWindow: {
+        startTime,
+        endTime,
+        },
+    };
+    }
 
   const rows = rollupPoints
     .map((point) => ({
