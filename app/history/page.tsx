@@ -1,16 +1,33 @@
 import { supabase } from "@/lib/supabase";
 import Link from "next/link";
 
-const EMOTION_EMOJIS: Record<string, string> = {
-  stress: "😓",
-  anxiety: "😰",
-  calm: "😌",
-  happy: "😄",
-  sad: "😢",
-  anger: "😠",
-  energetic: "⚡",
-  tired: "🥱",
+const EMOTION_META: Record<string, { emoji: string; valence: string }> = {
+  stress: { emoji: "😓", valence: "wine" },
+  anxiety: { emoji: "😰", valence: "wine" },
+  sad: { emoji: "😢", valence: "wine" },
+  anger: { emoji: "😠", valence: "wine" },
+  tired: { emoji: "🥱", valence: "mist" },
+  calm: { emoji: "😌", valence: "sage" },
+  happy: { emoji: "😄", valence: "sage" },
+  energetic: { emoji: "⚡", valence: "sage" },
 };
+
+const VALENCE_COLOR: Record<string, string> = {
+  wine: "var(--wine)",
+  mist: "var(--mist)",
+  sage: "var(--sage)",
+};
+
+function Metric({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex flex-col">
+      <span className="font-data text-[10px] uppercase tracking-wide text-[var(--ink)]/40">
+        {label}
+      </span>
+      <span className="font-data text-sm text-[var(--ink)]">{value}</span>
+    </div>
+  );
+}
 
 export default async function History() {
   const { data: summaries, error } = await supabase
@@ -19,74 +36,82 @@ export default async function History() {
     .order("day", { ascending: false })
     .limit(30);
 
-  if (error) {
-    return (
-      <main className="min-h-screen flex items-center justify-center bg-zinc-100">
-        <p className="text-red-500">Error al cargar el historial: {error.message}</p>
-      </main>
-    );
-  }
-
   return (
-    <main className="min-h-screen bg-zinc-100 p-6">
-      <div className="mx-auto max-w-4xl">
-        <div className="mb-6 flex items-center justify-between">
-          <h1 className="text-3xl font-bold">Historial</h1>
-          <Link href="/" className="text-sm text-blue-500 hover:underline">
+    <main
+      className="min-h-screen p-6 sm:p-10"
+      style={{ backgroundColor: "var(--paper)" }}
+    >
+      <div className="mx-auto max-w-3xl">
+        <div className="mb-10 flex items-baseline justify-between">
+          <h1 className="font-display text-4xl italic text-[var(--ink)]">Historial</h1>
+          <Link
+            href="/"
+            className="font-data text-xs uppercase tracking-[0.15em] text-[var(--ink)]/45 hover:text-[var(--ink)]/70"
+          >
             ← Volver
           </Link>
         </div>
 
-        <div className="overflow-x-auto rounded-xl bg-white shadow-lg">
-          <table className="w-full text-left text-sm">
-            <thead className="border-b border-zinc-200 bg-zinc-50">
-              <tr>
-                <th className="px-4 py-3">Día</th>
-                <th className="px-4 py-3">HR prom.</th>
-                <th className="px-4 py-3">HR reposo</th>
-                <th className="px-4 py-3">HRV</th>
-                <th className="px-4 py-3">Pasos</th>
-                <th className="px-4 py-3">Sueño</th>
-                <th className="px-4 py-3">Check-ins</th>
-                <th className="px-4 py-3">Emoción dominante</th>
-              </tr>
-            </thead>
-            <tbody>
-              {summaries?.map((row) => (
-                <tr key={row.day} className="border-b border-zinc-100 last:border-0">
-                  <td className="px-4 py-3 font-medium">
-                    {new Date(row.day).toLocaleDateString("es-CO", {
-                      weekday: "short",
-                      day: "numeric",
-                      month: "short",
-                    })}
-                  </td>
-                  <td className="px-4 py-3">{row.hr_avg ? Math.round(row.hr_avg) : "—"}</td>
-                  <td className="px-4 py-3">{row.hr_resting ? Math.round(row.hr_resting) : "—"}</td>
-                  <td className="px-4 py-3">{row.hrv_avg ? row.hrv_avg.toFixed(1) : "—"}</td>
-                  <td className="px-4 py-3">{row.total_steps ?? "—"}</td>
-                  <td className="px-4 py-3">{row.sleep_hours ? `${row.sleep_hours}h` : "—"}</td>
-                  <td className="px-4 py-3">{row.checkin_count}</td>
-                  <td className="px-4 py-3">
-                    {row.dominant_emotion ? (
-                      <span>
-                        {EMOTION_EMOJIS[row.dominant_emotion]} {row.dominant_emotion}
-                      </span>
-                    ) : (
-                      "—"
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        {error && (
+          <p className="font-data text-sm text-[var(--wine)]">
+            No se pudo cargar el historial: {error.message}
+          </p>
+        )}
 
-        {summaries?.length === 0 && (
-          <p className="mt-6 text-center text-zinc-500">
+        {summaries && summaries.length === 0 && (
+          <p className="font-display italic text-[var(--ink)]/50">
             Aún no hay datos suficientes. Vuelve mañana.
           </p>
         )}
+
+        <div className="divide-y divide-[var(--ink)]/10">
+          {summaries?.map((row) => {
+            const meta = row.dominant_emotion ? EMOTION_META[row.dominant_emotion] : null;
+            const dateLabel = new Date(row.day).toLocaleDateString("es-CO", {
+              weekday: "short",
+              day: "numeric",
+              month: "short",
+            });
+
+            return (
+              <div
+                key={row.day}
+                className="flex flex-wrap items-center justify-between gap-4 py-5"
+              >
+                <div className="w-28 shrink-0">
+                  <span className="font-display italic text-lg text-[var(--ink)]">
+                    {dateLabel}
+                  </span>
+                </div>
+
+                <div className="flex flex-1 flex-wrap gap-x-6 gap-y-2">
+                  <Metric label="HR prom." value={row.hr_avg ? `${Math.round(row.hr_avg)}` : "—"} />
+                  <Metric label="HR reposo" value={row.hr_resting ? `${Math.round(row.hr_resting)}` : "—"} />
+                  <Metric label="HRV" value={row.hrv_avg ? row.hrv_avg.toFixed(1) : "—"} />
+                  <Metric label="Pasos" value={row.total_steps ?? "—"} />
+                  <Metric label="Sueño" value={row.sleep_hours ? `${row.sleep_hours}h` : "—"} />
+                  <Metric label="Check-ins" value={String(row.checkin_count)} />
+                </div>
+
+                <div className="flex w-32 shrink-0 justify-end">
+                  {meta ? (
+                    <span
+                      className="inline-flex items-center gap-1.5 rounded-full px-3 py-1 font-data text-xs"
+                      style={{
+                        backgroundColor: `${VALENCE_COLOR[meta.valence]}1A`,
+                        color: VALENCE_COLOR[meta.valence],
+                      }}
+                    >
+                      {meta.emoji} {row.dominant_emotion}
+                    </span>
+                  ) : (
+                    <span className="font-data text-xs text-[var(--ink)]/30">—</span>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
       </div>
     </main>
   );

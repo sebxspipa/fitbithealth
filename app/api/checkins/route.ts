@@ -46,5 +46,13 @@ export async function POST(request: Request) {
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }
 
+  const { error: rpcError } = await supabase.rpc("compute_daily_summary", {
+    target_day: new Date().toISOString().split("T")[0],
+  });
+
+  if (rpcError) {
+    console.error("Error recalculando daily_summary tras check-in:", rpcError);
+  }
+
   return NextResponse.json({ success: true, checkin: data });
 }
