@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { syncMetric, syncSleep } from "@/lib/googleHealth";
+import { syncMetric, syncSleep, syncSteps } from "@/lib/googleHealth";
 
 const METRICS_TO_SYNC = ["heart_rate", "hrv"];
 
@@ -25,6 +25,17 @@ export async function POST() {
   } catch (err) {
     console.error("Error sincronizando sleep:", err);
     results.sleep = {
+      success: false,
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+
+  try {
+    const stepsResult = await syncSteps();
+    results.steps = { success: true, ...stepsResult };
+  } catch (err) {
+    console.error("Error sincronizando steps:", err);
+    results.steps = {
       success: false,
       error: err instanceof Error ? err.message : String(err),
     };

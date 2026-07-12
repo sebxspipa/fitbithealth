@@ -277,3 +277,98 @@ export async function syncSleep(): Promise<{ synced: number }> {
 
   return { synced: rows.length };
 }
+async function fetchStepsRollup(
+  accessToken: string,
+  startTime: string,
+  endTime: string
+): Promise<any[]> {
+  const url = "https://health.googleapis.com/v4/users/me/dataTypes/steps/dataPoints:rollUp";
+
+  let allPoints: any[] = [];
+  let pageToken: string | undefined = undefined;
+
+  do {
+    const body: any = {
+      range: { startTime, endTime },
+      windowSize: "3600s",
+    };
+    if (pageToken) body.pageToken = pageToken;
+
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      console.error("Error consultando steps rollup:", data);
+      throw new Error(`Fallo la consulta de steps a Google Health: ${JSON.stringify(data)}`);
+    }
+
+    allPoints = allPoints.concat(data.rollupDataPoints ?? []);
+    pageToken = data.nextPageToken;
+
+    if (pageToken) {
+      await new Promise((resolve) => setTimeout(resolve, 150));
+    }
+  } while (pageToken);
+
+  return allPoints;
+}
+
+export async function syncSteps(): Promise<{ synced: number; rawSample?: any }> {
+  const accessToken = await getValidAccessToken();
+
+  const { data: syncRow } = await supabase
+    .from("sync_state")
+    .select("*")
+    .eq("data_type", "steps")
+    .maybeSingle();
+
+  const startTime = syncRow?.last_synced_at ?? new Date(Date.now() - 15 * 60 * 1000).toISOString();
+  const endTime = new Date().toISOString();
+
+  const rollupPoints = await fetchStepsRollup(accessToken, startTime, endTime);
+
+  if (rollupPoints.length === 0) {
+    await supabase.from("sync_state").upsert({
+      data_type: "steps",
+      last_synced_at: endTime,
+      updated_at: new Date().toISOString(),
+    });
+    console.log(`Sync steps: 0 ventanas. Rango: ${startTime} → ${endTime}`);
+    return { synced: 0 };
+  }
+
+  const rows = rollupPoints
+    .map((point) => ({
+      metric_type: "steps",
+      value: Number(point.steps?.countSum ?? 0),
+      unit: "count",
+      sample_time: point.startTime,
+      source_device: "FITBIT",
+    }))
+    .filter((row) => row.sample_time);
+
+  const { error: insertError } = await supabase
+    .from("physiological_samples")
+    .upsert(rows, { onConflict: "metric_type,sample_time,source_device", ignoreDuplicates: true });
+
+  if (insertError) {
+    console.error("Error guardando steps:", insertError);
+    throw insertError;
+  }
+
+  await supabase.from("sync_state").upsert({
+    data_type: "steps",
+    last_synced_at: endTime,
+    updated_at: new Date().toISOString(),
+  });
+
+  return { synced: rows.length, rawSample: rollupPoints[0] };
+}
